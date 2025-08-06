@@ -23,17 +23,24 @@ async def generate_calendar_endpoint(
     request: CalendarRequest,
     db: AsyncSession = Depends(get_db)
 ):
+    print(f"[DEBUG] Received calendar generation request for {request.brand_name}")
     if not all([request.brand_name, request.niche, request.platform, request.posting_frequency, request.tone]):
         raise HTTPException(status_code=400, detail="All fields must be provided.")
-    result = await generate_calendar(
-        brand_name=request.brand_name,
-        niche=request.niche,
-        platform=request.platform,
-        posting_frequency=request.posting_frequency,
-        tone=request.tone,
-        db=db
-    )
-    return result
+    try:
+        print("[DEBUG] Calling generate_calendar service")
+        result = await generate_calendar(
+            brand_name=request.brand_name,
+            niche=request.niche,
+            platform=request.platform,
+            posting_frequency=request.posting_frequency,
+            tone=request.tone,
+            db=db
+        )
+        print(f"[DEBUG] Successfully generated calendar: {result}")
+        return result
+    except Exception as e:
+        print(f"[ERROR] Calendar generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Calendar generation failed")
 
 @router.post("/email-calendar")
 async def email_calendar(

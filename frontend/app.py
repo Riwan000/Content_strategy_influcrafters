@@ -1,6 +1,10 @@
 import streamlit as st
 import requests
 import pandas as pd
+import os
+
+# Get backend URL from environment variable or use default for local development
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="Content Strategy Agent", layout="wide")
 
@@ -61,7 +65,7 @@ with tab2:
     if submitted_trend:
         with st.spinner("Analyzing trends from Google Trends and Reddit..."):
             try:
-                res = requests.post("http://localhost:8000/analyze-trends", json={"keyword": keyword})
+                res = requests.post(f"{BACKEND_URL}/analyze-trends", json={"keyword": keyword})
                 if res.status_code == 200:
                     data = res.json()
                     
@@ -138,7 +142,7 @@ with tab2:
                     st.error(f"Error: {res.status_code} - {res.text}")
             except Exception as e:
                 st.error(f"Connection failed: {e}")
-                st.info("Make sure the backend server is running on http://localhost:8000")
+                st.info(f"Make sure the backend server is running on {BACKEND_URL}")
 
 # TAB 3: CONTENT CALENDAR
 with tab3:
@@ -179,7 +183,7 @@ with tab3:
                 "posting_frequency": frequency
             }
             try:
-                res = requests.post("http://localhost:8000/generate-calendar", json=payload)
+                res = requests.post(f"{BACKEND_URL}/generate-calendar", json=payload)
                 if res.status_code == 200:
                     calendar = res.json()
                     st.session_state['calendar'] = calendar
@@ -192,18 +196,43 @@ with tab3:
     # Always show calendar, download, and email UI if calendar exists
     calendar = st.session_state.get('calendar')
     if calendar:
-        # Display calendar
+        # Display calendar with improved formatting
         for week in calendar:
-            st.markdown(f"## 📆 Week {week['week']}")
-            for post in week["posts"]:
-                with st.expander(f"{post['day']} - {post['post_type']}: {post['theme']}"):
-                    st.markdown(f"""
-                    **🗓 Day:** {post['day']}  
-                    **📌 Type:** {post['post_type']}  
-                    **🎯 Theme:** {post['theme']}  
-                    **✍️ Caption:** {post['caption']}  
-                    **🏷 Hashtags:** {' '.join(post.get('hashtags', []))}  
-                    """)
+            st.markdown(f"### 📆 Week {week['week']}")
+            
+            # Debug information
+            st.write(f"Displaying {len(week['posts'])} posts for Week {week['week']}")
+            
+            # Group posts into rows of 3
+            posts = week["posts"]
+            for i in range(0, len(posts), 3):
+                # Create a new row of columns for every 3 posts
+                cols = st.columns(3)
+                
+                # Get the posts for this row (up to 3)
+                row_posts = posts[i:i+3]
+                
+                # Display each post in its column
+                for j, post in enumerate(row_posts):
+                    with cols[j]:
+                        with st.container(border=True):
+                            st.markdown(f"#### {post['day']} - {post['post_type']}")
+                            st.markdown(f"**Theme:** {post['theme']}")
+                            
+                            # Display caption with proper formatting
+                            st.markdown("**Caption:**")
+                            st.markdown(f"{post['caption']}")
+                            
+                            # Display hashtags as chips
+                            if post.get('hashtags'):
+                                st.markdown("**Hashtags:**")
+                                hashtags = ' '.join([f'#{tag}' for tag in post['hashtags']])
+                                st.markdown(f"{hashtags}")
+                            
+                            # Add visual separator
+                            st.divider()
+                      
+
         # --- Export as CSV ---
         posts = []
         for week in calendar:
@@ -226,7 +255,7 @@ with tab3:
         email = st.text_input("📧 Enter email to send this calendar")
         if st.button("📤 Send Email"):
             print("Send Email button clicked")
-            response = requests.post("http://localhost:8000/email-calendar", json={
+            response = requests.post(f"{BACKEND_URL}/email-calendar", json={
                 "email": email,
                 "calendar": calendar
             })
@@ -247,7 +276,7 @@ with tab4:
             payload = {"text": captions.strip()}
             try:
                 with st.spinner("Analyzing brand voice..."):
-                    res = requests.post("http://localhost:8000/analyze-tone", json=payload)
+                    res = requests.post(f"{BACKEND_URL}/analyze-tone", json=payload)
                 if res.status_code == 200:
                     result = res.json()
                     description = result.get("brand_voice_description")
@@ -261,4 +290,4 @@ with tab4:
             except Exception as e:
                 st.error(f"Connection failed: {e}")
         else:
-            st.warning("Please provide sample captions to analyze.") 
+            st.warning("Please provide sample captions to analyze.")
