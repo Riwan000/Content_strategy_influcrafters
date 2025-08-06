@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+requests
+beautifulsoup4
+pydantic
+pytrends
+sqlalchemy[asyncio]
+asyncpg
+python-dotenv
+psycopg2-binary
+praw
+# For email sending (uses Python stdlib: smtplib, email.message)
+# Requires .env with EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS
+pillow
+httpx
