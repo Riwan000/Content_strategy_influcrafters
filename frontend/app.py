@@ -4,7 +4,11 @@ import pandas as pd
 import os
 
 # Get backend URL from environment variable or use default for local development
-BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
+raw_backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
+if not raw_backend_url.startswith("http"):
+    BACKEND_URL = f"http://{raw_backend_url}"
+else:
+    BACKEND_URL = raw_backend_url
 
 st.set_page_config(page_title="Content Strategy Agent", layout="wide")
 

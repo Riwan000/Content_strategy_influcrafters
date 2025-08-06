@@ -22,4 +22,4 @@ services:
         fromService:
           name: influcrafters-backend
           type: web
-          property: url
+          property: hostport
