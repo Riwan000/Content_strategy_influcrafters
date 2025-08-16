@@ -90,15 +90,19 @@ def analyze_trends(keyword):
                     df['date'] = pd.to_datetime(df['date'])
                     df = df.set_index('date')
                     chart = df
-                    
-            summary = f"📊 Found: {len(data.get('related_topics', []))} Google topics, {len(data.get('rising_trends', []))} Google trends, {len(data.get('interest_over_time', []))} interest points, {len(data.get('reddit_topics', []))} Reddit topics, {len(data.get('reddit_trends', []))} Reddit trends"
+            # Use backend-provided summary when available, otherwise fall back to a simple counts summary
+            counts_summary = f"📊 Found: {len(data.get('related_topics', []))} Google topics, {len(data.get('rising_trends', []))} Google trends, {len(data.get('interest_over_time', []))} interest points, {len(data.get('reddit_topics', []))} Reddit topics, {len(data.get('reddit_trends', []))} Reddit trends"
+            backend_summary = data.get('summary') if data.get('summary') else counts_summary
             status = f"✅ Analysis completed for '{keyword}'" + (" (using sample data)" if data.get("note") else "")
-            
-            return google_topics, google_trends, reddit_topics, reddit_trends, chart, status, "\n".join(info_msgs + [summary])
+
+            # info contains any notes or warnings; summary is the highlights returned separately
+            info_text = "\n".join(info_msgs) if info_msgs else ""
+
+            return google_topics, google_trends, reddit_topics, reddit_trends, chart, status, info_text, backend_summary
         else:
             return "", "", "", "", None, f"Error: {res.status_code} - {res.text}", ""
     except Exception as e:
-        return "", "", "", "", None, f"Connection failed: {e}", f"Make sure the backend server is running on {BACKEND_URL}"
+        return "", "", "", "", None, f"Connection failed: {e}", f"Make sure the backend server is running on {BACKEND_URL}", ""
 
 def generate_calendar(brand_name, niche, platform, tone, frequency):
     payload = {
@@ -203,7 +207,10 @@ with gr.Blocks(title="Content Strategy Agent") as demo:
         chart = gr.LinePlot(label="Interest Over Time (Google Trends)", x="date") 
         status = gr.Textbox(label="Status", interactive=False) 
         info = gr.Markdown() 
-        analyze_btn.click( analyze_trends, [keyword], [google_topics, google_trends, reddit_topics, reddit_trends, chart, status, info] )
+        # New: summary area to display model or synthesized highlights
+        summary = gr.Markdown()
+        # analyzer now returns an extra `summary` field (uses backend summary when available)
+        analyze_btn.click(analyze_trends, [keyword], [google_topics, google_trends, reddit_topics, reddit_trends, chart, status, info, summary])
 
     with gr.Tab("📅 Content Calendar"):
         gr.Markdown("### 📅 Content Calendar Generator")

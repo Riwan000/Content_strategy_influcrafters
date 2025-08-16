@@ -9,6 +9,84 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+import os
+
+# OpenRouter config (optional)
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "mistralai/mistral-7b-instruct")
+
+def call_model_summary(prompt: str, max_tokens: int = 300) -> str:
+    """Call OpenRouter (chat completion) synchronously to get a summary."""
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY not set")
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "top_k": 40
+    }
+    try:
+        resp = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        # Navigate response structure defensively
+        choices = data.get("choices") or []
+        if choices and isinstance(choices, list):
+            msg = choices[0].get("message", {}).get("content") if isinstance(choices[0], dict) else None
+            if msg:
+                return msg.strip()
+        # fallback to text if present
+        return data.get("text", "").strip()
+    except Exception as e:
+        raise
+
+
+def synthesize_summary_from_data(result: dict, keyword: str) -> str:
+    """Create a concise 3-6 bullet summary from available trend data when model is unavailable."""
+    bullets = []
+    try:
+        related = result.get('related_topics', [])[:4]
+        rising = result.get('rising_trends', [])[:4]
+        reddit = result.get('reddit_trends', [])[:3]
+        interest = result.get('interest_over_time', [])
+
+        if related:
+            bullets.append(f"Top related searches: {', '.join(related)}.")
+
+        if rising:
+            bullets.append(f"Rising trends to watch: {', '.join(rising)}.")
+
+        if reddit:
+            bullets.append(f"Reddit highlights: {', '.join(reddit)}.")
+
+        # interest trend direction
+        if interest and isinstance(interest, list) and len(interest) >= 2:
+            try:
+                first = int(interest[0].get('score', 0))
+                last = int(interest[-1].get('score', 0))
+                if last > first:
+                    bullets.append(f"Interest is rising (from {first} to {last}). Consider doubling down on timely content.")
+                elif last < first:
+                    bullets.append(f"Interest is declining (from {first} to {last}). Consider evergreen content or re-testing messaging.")
+                else:
+                    bullets.append("Interest appears stable over the sampled period.")
+            except Exception:
+                pass
+
+        # short actionable recommendations
+        if len(bullets) < 3:
+            bullets.append(f"Action: experiment with content around '{keyword}' using formats: short reels, how-to posts, and case studies.")
+
+        # Ensure 3-6 bullets
+        return '\n'.join([f"- {b}" for b in bullets[:6]])
+    except Exception as e:
+        return f"No summary available: {e}"
 
 def get_reddit_trends(keyword: str) -> dict:
     """Fetch trending Reddit posts and topics related to the keyword"""
@@ -224,11 +302,67 @@ def analyze_trends(keyword: str) -> dict:
                 result["related_topics"] = mock_data["related_topics"]
             if not result.get("rising_trends"):
                 result["rising_trends"] = mock_data["rising_trends"]
-        
+
+        # Append a concise AI-generated summary (highlights) when possible
+        try:
+            if OPENROUTER_API_KEY:
+                # Build a short context for the model
+                top_related = result.get("related_topics", [])[:6]
+                top_rising = result.get("rising_trends", [])[:6]
+                top_reddit = result.get("reddit_trends", [])[:6]
+                interest = result.get("interest_over_time", [])
+                interest_summary = ""
+                if interest:
+                    try:
+                        scores = [int(p.get("score", 0)) for p in interest if isinstance(p, dict)]
+                        if scores:
+                            interest_summary = f"interest points: min={min(scores)}, max={max(scores)}, latest={scores[-1]}"
+                    except Exception:
+                        interest_summary = "interest data present"
+
+                prompt_parts = [
+                    f"Keyword: {keyword}",
+                    f"Top related topics: {', '.join(top_related) if top_related else 'none'}",
+                    f"Rising trends: {', '.join(top_rising) if top_rising else 'none'}",
+                    f"Reddit highlights: {', '.join(top_reddit) if top_reddit else 'none'}",
+                    f"{interest_summary}",
+                    "\nProvide a concise summary (3-6 bullet highlights) of the most important insights and recommended actions for a marketer according to the reddit and google trends insight given above. Make sure every point is explained in detail in bullet points."
+                ]
+                prompt = "\n".join([p for p in prompt_parts if p])
+                try:
+                    summary = call_model_summary(prompt, max_tokens=5000)
+                    if summary:
+                        result["summary"] = summary
+                except Exception as e:
+                    print(f"Model summary failed: {e}")
+        except Exception as e:
+            print(f"Unexpected error when generating summary: {e}")
+
+        # Ensure summary exists even if model was not used or failed
+        if "summary" not in result:
+            result["summary"] = synthesize_summary_from_data(result, keyword)
+
         return result
     else:
         # Return mock data with Reddit data if available
         mock_data = get_mock_trend_data(keyword)
         mock_data["reddit_topics"] = reddit_data.get("reddit_topics", [])
         mock_data["reddit_trends"] = reddit_data.get("reddit_trends", [])
-        return mock_data 
+        # Also attempt to summarize mock+reddit if model available
+        try:
+            if OPENROUTER_API_KEY:
+                prompt = f"Keyword: {keyword}\nTop related topics: {', '.join(mock_data.get('related_topics', [])[:6])}\nRising trends: {', '.join(mock_data.get('rising_trends', [])[:6])}\nReddit highlights: {', '.join(mock_data.get('reddit_trends', [])[:6])}\n\nProvide a concise summary (3-6 bullet highlights) and recommended actions for a marketer."
+                try:
+                    summary = call_model_summary(prompt, max_tokens=200)
+                    if summary:
+                        mock_data['summary'] = summary
+                except Exception as e:
+                    print(f"Model summary on mock data failed: {e}")
+        except Exception:
+            print("Unexpected error when generating mock summary")
+
+        # Ensure summary exists even if model not available
+        if 'summary' not in mock_data:
+            mock_data['summary'] = synthesize_summary_from_data(mock_data, keyword)
+
+        return mock_data
