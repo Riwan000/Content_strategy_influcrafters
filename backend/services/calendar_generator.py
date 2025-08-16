@@ -155,7 +155,7 @@ Day 2 - Post:
 
 [Continue with {posting_frequency} posts per week]
 
-Now, generate the 4-week content calendar with exactly {posting_frequency} posts per week:
+Now, generate the 4-week content calendar with exactly {posting_frequency} posts per week (Make sure to include all fields and use relevant themes, captions, and hashtags as well as {posting_frequency} number of contents are created per week.).:
 """
     print(f"[DEBUG] Generated prompt: {prompt[:200]}...")  # Log first 200 chars of prompt
     try:
@@ -164,23 +164,89 @@ Now, generate the 4-week content calendar with exactly {posting_frequency} posts
         print(f"[DEBUG] Received API response: {output_text[:200]}...")  # Log first 200 chars
         calendar_struct = parse_calendar_output(output_text, posting_frequency)
         print(f"[DEBUG] Parsed calendar structure: {calendar_struct}")
+        # If model returned incomplete weeks or wrong post counts, attempt to ask the model to continue/fill missing parts
+        try_count = 0
+        max_retries = 2
+        # Helper to check completeness
+        def check_completeness(struct):
+            weeks_present = {int(w.get('week', 0)) for w in struct if isinstance(w, dict)}
+            missing_weeks = [w for w in range(1, 5) if w not in weeks_present]
+            weeks_with_few_posts = [w.get('week') for w in struct if isinstance(w, dict) and len(w.get('posts', [])) != posting_frequency]
+            return missing_weeks, weeks_with_few_posts
+
+        missing_weeks, weeks_with_few_posts = check_completeness(calendar_struct)
+        while (missing_weeks or weeks_with_few_posts) and try_count < max_retries:
+            try_count += 1
+            print(f"[DEBUG] Detected missing weeks {missing_weeks} or weeks with wrong post counts {weeks_with_few_posts}; requesting continuation (attempt {try_count})")
+            followup_prompt = ""
+            if missing_weeks:
+                followup_prompt += f"Continue the 4-week calendar by producing the missing week numbers: {missing_weeks}. Use the same format as before and include exactly {posting_frequency} posts per week.\n\n"
+            for wk in weeks_with_few_posts:
+                followup_prompt += f"For Week {wk}, provide additional posts so the total posts for that week equals {posting_frequency}. Use the same format as before.\n\n"
+            # Provide the original output as context
+            followup_prompt = f"The model previously returned the following calendar (possibly incomplete):\n\n{output_text}\n\nPlease continue/fill as requested:\n{followup_prompt}"
+            try:
+                continuation = await call_openrouter_api(followup_prompt, max_tokens=2000)
+                print(f"[DEBUG] Received continuation from model: {continuation[:200]}...")
+                cont_struct = parse_calendar_output(continuation, posting_frequency)
+                print(f"[DEBUG] Parsed continuation structure: {cont_struct}")
+                # Merge continuation weeks into calendar_struct (prefer model-provided weeks)
+                existing_weeks = {int(w.get('week')): w for w in calendar_struct if isinstance(w, dict)}
+                for cw in cont_struct:
+                    try:
+                        wn = int(cw.get('week', 0))
+                    except Exception:
+                        continue
+                    if wn and (wn not in existing_weeks or len(existing_weeks[wn].get('posts', [])) < len(cw.get('posts', []))):
+                        existing_weeks[wn] = cw
+                # Recreate calendar_struct preserving order
+                calendar_struct = [existing_weeks.get(i, {"week": i, "posts": []}) for i in range(1, max(existing_weeks.keys())+1)]
+            except Exception as e:
+                print(f"[WARN] Continuation request failed: {e}")
+            missing_weeks, weeks_with_few_posts = check_completeness(calendar_struct)
     except Exception as e:
-        print(f"[ERROR] Failed to generate calendar: {str(e)}")
-        raise
-    # Validate we got the correct number of posts per week
-    if not isinstance(calendar_struct, list):
-        print(f"[ERROR] Invalid calendar structure: {type(calendar_struct)}")
-        return []
-        
-    for week in calendar_struct:
-        if not isinstance(week, dict) or 'posts' not in week:
-            print(f"[ERROR] Invalid week structure: {week}")
-            continue
-            
-        if len(week.get('posts', [])) != posting_frequency:
-            print(f"[ERROR] Week {week.get('week', '?')} has {len(week.get('posts', []))} posts, expected {posting_frequency}")
-            # Don't regenerate, just continue with what we have
-            continue
+        # If external API fails or parsing fails, fall back to a deterministic synthetic calendar
+        print(f"[WARN] OpenRouter API failed or returned unparsable output: {str(e)}; falling back to synthetic calendar")
+        def synthetic_post(week_idx, post_idx):
+            return {
+                "day": f"Day {post_idx+1}",
+                "post_type": "Post",
+                "theme": f"{niche} insight #{week_idx*posting_frequency + post_idx + 1}",
+                "caption": f"Auto-generated post for {brand_name}: idea #{week_idx*posting_frequency + post_idx + 1}",
+                "hashtags": [f"#{niche.replace(' ','')}"]
+            }
+
+        calendar_struct = []
+        for w in range(4):
+            week_posts = [synthetic_post(w, p) for p in range(posting_frequency)]
+            calendar_struct.append({"week": w+1, "posts": week_posts})
+        print(f"[DEBUG] Synthetic calendar created with {len(calendar_struct)} weeks")
+    # Normalize to exactly 4 weeks and exactly posting_frequency posts per week
+    normalized_weeks = []
+    # Build a lookup by week number
+    week_lookup = {int(w.get('week', idx+1)): w for idx, w in enumerate(calendar_struct) if isinstance(w, dict)}
+    for week_num in range(1, 5):
+        w = week_lookup.get(week_num)
+        if not w or 'posts' not in w:
+            # create empty week
+            w = {"week": week_num, "posts": []}
+        posts = w.get('posts', [])
+        # If too many posts, trim
+        if len(posts) > posting_frequency:
+            posts = posts[:posting_frequency]
+        # If too few posts, pad with synthetic entries
+        while len(posts) < posting_frequency:
+            idx = len(posts)
+            posts.append({
+                "day": f"Day {idx+1}",
+                "post_type": "Post",
+                "theme": f"{niche} idea",
+                "caption": f"Auto-generated placeholder for {brand_name}",
+                "hashtags": []
+            })
+        normalized_weeks.append({"week": week_num, "posts": posts})
+
+    calendar_struct = normalized_weeks
     
     # Store brand if not exists
     result = await db.execute(select(Brand).where(Brand.name == brand_name))
