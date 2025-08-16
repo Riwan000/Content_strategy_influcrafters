@@ -7,7 +7,7 @@ REM Give the backend a moment to start
 timeout /t 5 /nobreak
 
 REM Start the Streamlit frontend
-start cmd /k ".venv\Scripts\activate && cd frontend && streamlit run app.py"
+start cmd /k ".venv\Scripts\activate && cd frontend && python app.py"
 
 
 exit
