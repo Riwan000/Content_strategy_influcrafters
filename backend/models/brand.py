@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Column, String, DateTime, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from database import Base
+
 
 class Brand(Base):
     __tablename__ = "brands"
@@ -11,4 +12,5 @@ class Brand(Base):
     niche = Column(String)
     tone = Column(String)
     platform = Column(String)
+    posting_frequency = Column(Integer, default=3)
     created_at = Column(DateTime, default=datetime.utcnow)

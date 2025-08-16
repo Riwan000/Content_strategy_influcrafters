@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSON
-from backend.database import Base
+from database import Base
 
 class Trend(Base):
     __tablename__ = "trends"

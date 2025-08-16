@@ -1,6 +1,6 @@
 import asyncio
-from backend.database import engine, Base
-from backend.models import brand, content_calendar, competitor, trend, user
+from database import engine, Base
+from models import brand, content_calendar, competitor, trend, user
 
 async def init_models():
     async with engine.begin() as conn:
